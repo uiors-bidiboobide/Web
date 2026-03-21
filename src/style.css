@@ -1,0 +1,46 @@
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-width: 320px;
+  font-family: Inter, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  background: #f5f7fa;
+  color: #1f2937;
+}
+
+#app {
+  min-height: 100vh;
+}
+
+/* 全局背景装饰（根据需求轮播：background1~4） */
+body::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  background-size: cover;
+  background-position: center;
+  background-image: url('../img/background1.jpg');
+  animation: examHelperBg 20s ease-in-out infinite;
+  opacity: 0.35;
+}
+
+@keyframes examHelperBg {
+  0% {
+    background-image: url('../img/background1.jpg');
+  }
+  25% {
+    background-image: url('../img/background2.jpg');
+  }
+  50% {
+    background-image: url('../img/background3.jpg');
+  }
+  75% {
+    background-image: url('../img/background4.jpg');
+  }
+  100% {
+    background-image: url('../img/background1.jpg');
+  }
+}
