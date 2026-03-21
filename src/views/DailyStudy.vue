@@ -4,9 +4,14 @@ import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { planApi } from '@/api/plan'
+import { profileApi } from '@/api/profile'
 import { recordApi } from '@/api/record'
 import { testApi } from '@/api/test'
-import type { DailyPlan, Question } from '@/types/api'
+import FavoriteAddDialog from '@/components/FavoriteAddDialog.vue'
+import { useStudyDurationReporting } from '@/composables/useStudyDurationReporting'
+import type { DailyPlan, FavoriteTargetType, Question } from '@/types/api'
+
+useStudyDurationReporting()
 
 const route = useRoute()
 const router = useRouter()
@@ -39,6 +44,16 @@ const openAiQuestion = (questionId: number) => {
     path: '/ai/chat',
     query: { contextType: 'QUESTION', contextId: questionId },
   })
+}
+
+const favoriteDialogVisible = ref(false)
+const favoriteTargetType = ref<FavoriteTargetType>('KNOWLEDGE_POINT')
+const favoriteTargetId = ref(0)
+
+const openFavorite = (targetType: FavoriteTargetType, targetId: number) => {
+  favoriteTargetType.value = targetType
+  favoriteTargetId.value = targetId
+  favoriteDialogVisible.value = true
 }
 
 const clearPoll = () => {
@@ -151,6 +166,9 @@ const enterTest = async () => {
     if (res.status === 'READY') {
       questions.value = res.questions
       inTestView.value = true
+      profileApi
+        .postActivity({ activityType: 'TEST_START', subjectId: subjectId.value })
+        .catch((e) => console.warn('TEST_START activity failed', e))
     } else {
       testStatus.value = 'FAILED'
       testError.value = res.error || '生成尚未就绪，请稍后重试'
@@ -187,7 +205,14 @@ const submitTest = async () => {
   }
 }
 
-onMounted(fetchDailyPlan)
+const boot = async () => {
+  await fetchDailyPlan()
+  profileApi.postActivity({ activityType: 'STUDY_START', subjectId: subjectId.value }).catch((e) => {
+    console.warn('STUDY_START activity failed', e)
+  })
+}
+
+onMounted(boot)
 onUnmounted(() => clearPoll())
 </script>
 
@@ -205,6 +230,7 @@ onUnmounted(() => clearPoll())
           <el-button v-if="!point.completedToday" type="primary" @click="markComplete(point.id)">标记完成</el-button>
           <el-button v-if="!point.completedToday" @click="deferPoint(point.id)">顺延至明天</el-button>
           <el-button type="primary" size="small" plain @click="openAiKnowledgePoint(point.id)">AI讲解</el-button>
+          <el-button size="small" @click="openFavorite('KNOWLEDGE_POINT', point.id)">收藏</el-button>
           <el-tag v-if="point.completedToday" type="success">已完成</el-tag>
         </el-space>
       </el-card>
@@ -253,6 +279,7 @@ onUnmounted(() => clearPoll())
               </el-radio-group>
               <div class="question-ai-row">
                 <el-button size="small" type="primary" plain @click="openAiQuestion(q.id)">AI讲解</el-button>
+                <el-button size="small" @click="openFavorite('QUESTION', q.id)">收藏</el-button>
               </div>
             </div>
           </el-skeleton>
@@ -260,6 +287,12 @@ onUnmounted(() => clearPoll())
         </div>
       </div>
     </div>
+
+    <FavoriteAddDialog
+      v-model="favoriteDialogVisible"
+      :target-type="favoriteTargetType"
+      :target-id="favoriteTargetId"
+    />
   </el-card>
 </template>
 

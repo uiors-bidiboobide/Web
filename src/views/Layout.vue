@@ -26,6 +26,15 @@ const logout = () => {
       </div>
       <div class="header-actions">
         <el-button type="primary" plain @click="$router.push('/subject/create')">创建科目</el-button>
+        <span
+          class="user-link"
+          role="button"
+          tabindex="0"
+          @click="router.push('/profile')"
+          @keydown.enter.prevent="router.push('/profile')"
+        >
+          {{ authStore.username || '用户' }}
+        </span>
         <el-button @click="logout">退出登录</el-button>
       </div>
     </el-header>
@@ -66,6 +75,18 @@ const logout = () => {
 
 .header-actions {
   display: flex;
+  align-items: center;
   gap: 12px;
+}
+
+.user-link {
+  color: var(--el-color-primary);
+  cursor: pointer;
+  font-weight: 600;
+  padding: 0 4px;
+}
+
+.user-link:hover {
+  text-decoration: underline;
 }
 </style>

@@ -166,3 +166,85 @@ export interface AiChatHistoryItem {
   content: string
   createTime: string
 }
+
+// -----------------------------
+// 收藏夹 / 收藏（与 AI contextType 对齐）
+// -----------------------------
+
+export interface FavoriteFolder {
+  id: number
+  name: string
+  createTime: string
+}
+
+export interface CreateFavoriteFolderBody {
+  name: string
+}
+
+export interface RenameFavoriteFolderBody {
+  name: string
+}
+
+export type FavoriteTargetType = AiChatContextType
+
+export interface FavoriteItemVO {
+  id: number
+  folderId: number
+  folderName: string
+  targetType: FavoriteTargetType
+  targetId: number
+  note: string | null
+  createTime: string
+  knowledgePointName: string | null
+  knowledgePointDescription: string | null
+  knowledgePointSubjectId: number | null
+  questionContentPreview: string | null
+  questionSubjectId: number | null
+  questionKnowledgePointId: number | null
+}
+
+export interface CreateFavoriteBody {
+  folderId: number
+  targetType: FavoriteTargetType
+  targetId: number
+  note?: string
+}
+
+export interface PatchFavoriteBody {
+  folderId?: number
+  note?: string
+}
+
+export interface FavoriteListQuery {
+  folderId?: number
+  targetType?: FavoriteTargetType
+}
+
+// -----------------------------
+// 个人主页 / 行为 / 学习时长
+// -----------------------------
+
+export type ProfileActivityType = 'STUDY_START' | 'TEST_START'
+
+export interface RecentActivityItem {
+  activityType: ProfileActivityType
+  subjectId: number
+  subjectName: string
+  createTime: string
+}
+
+export interface ProfileMe {
+  userId: number
+  username: string
+  todayStudySeconds: number
+  recentActivities: RecentActivityItem[]
+}
+
+export interface PostActivityBody {
+  activityType: ProfileActivityType
+  subjectId: number
+}
+
+export interface PostStudyDurationBody {
+  secondsDelta: number
+}
