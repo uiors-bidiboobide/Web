@@ -22,6 +22,7 @@ export interface Subject {
   totalDays: number
   progress: string
   status: 0 | 1
+  description?: string
 }
 
 export interface CreateSubjectForm {
@@ -53,13 +54,24 @@ export interface StudyPlan {
   planGenerated: boolean
   totalDays: number
   totalPoints: number
+  startDate?: string
+  endDate?: string
 }
 
 export interface DailyPlan {
   date: string
   subjectId: number
   isCompleted: 0 | 1
-  knowledgePoints: KnowledgePoint[]
+  knowledgePoints: DailyKnowledgePoint[]
+}
+
+export interface DailyKnowledgePoint {
+  id: number
+  name: string
+  level: 1 | 2 | 3 | 4 | 5
+  description: string
+  completedToday?: boolean
+  isDeferred?: boolean
 }
 
 export interface Question {

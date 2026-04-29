@@ -14,6 +14,7 @@ const routes = [
       { path: 'subject/:id/points', component: () => import('@/views/KnowledgePoints.vue') },
       { path: 'subject/:id/plan', component: () => import('@/views/StudyPlan.vue') },
       { path: 'subject/:id/daily/:date', component: () => import('@/views/DailyStudy.vue') },
+      { path: 'ai', component: () => import('@/views/AIDirectPage.vue') },
       { path: 'ai/chat', component: () => import('@/views/AIChatPage.vue') },
       { path: 'profile', component: () => import('@/views/ProfilePage.vue') },
     ],

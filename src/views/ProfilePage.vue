@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import dayjs from 'dayjs'
 import { computed, onMounted, reactive, ref } from 'vue'
+import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { favoriteApi } from '@/api/favorite'
 import { favoriteFolderApi } from '@/api/favoriteFolder'
@@ -13,6 +14,7 @@ import type {
   RecentActivityItem,
 } from '@/types/api'
 
+const router = useRouter()
 const loading = ref(false)
 const profile = ref<ProfileMe | null>(null)
 
@@ -36,20 +38,21 @@ const editFav = reactive<{ id: number; folderId: number; note: string }>({
 })
 const editFavSubmitting = ref(false)
 
+const activeTab = ref('overview')
+
 const todayMinutes = computed(() => {
   const s = profile.value?.todayStudySeconds ?? 0
   return Math.floor(s / 60)
 })
 
-const formatTime = (iso: string) => dayjs(iso).format('YYYY-MM-DD HH:mm:ss')
+const formatTime = (iso: string) => dayjs(iso).format('YYYY-MM-DD HH:mm')
 
 const activityText = (a: RecentActivityItem) => {
-  const u = profile.value?.username ?? '用户'
   const t = formatTime(a.createTime)
   if (a.activityType === 'STUDY_START') {
-    return `用户 ${u}，于 ${t} 开始了 ${a.subjectName} 学科的学习`
+    return `于 ${t} 开始了 ${a.subjectName} 学科的学习`
   }
-  return `用户 ${u}，于 ${t} 开始了 ${a.subjectName} 学科的测试`
+  return `于 ${t} 开始了 ${a.subjectName} 学科的测试`
 }
 
 const favoriteTitle = (row: FavoriteItemVO) => {
@@ -61,9 +64,9 @@ const favoriteTitle = (row: FavoriteItemVO) => {
 
 const favoriteDetail = (row: FavoriteItemVO) => {
   if (row.targetType === 'KNOWLEDGE_POINT') {
-    return row.knowledgePointDescription || '—'
+    return row.knowledgePointDescription || '暂无描述'
   }
-  return `科目 ID: ${row.questionSubjectId ?? '—'}，关联知识点: ${row.questionKnowledgePointId ?? '—'}`
+  return `科目 ID: ${row.questionSubjectId ?? '—'}`
 }
 
 const loadProfile = async () => {
@@ -180,97 +183,167 @@ onMounted(async () => {
 </script>
 
 <template>
-  <el-card v-loading="loading">
-    <template #header>个人主页</template>
+  <div class="profile-page">
+    <!-- Page Header -->
+    <div class="page-header">
+      <el-button text @click="router.push('/subjects')" class="back-btn">
+        <span class="back-icon">←</span>
+        返回
+      </el-button>
+      <div class="header-content">
+        <h1 class="page-title">个人中心</h1>
+      </div>
+      <div class="header-spacer"></div>
+    </div>
 
-    <el-tabs>
-      <el-tab-pane label="概览">
-        <div v-if="profile" class="overview">
-          <p class="welcome">你好，<strong>{{ profile.username }}</strong></p>
-          <p class="stat">今日已学习 <strong>{{ todayMinutes }}</strong> 分钟（约 {{ profile.todayStudySeconds }} 秒）</p>
-          <el-divider content-position="left">最近动态</el-divider>
-          <el-timeline v-if="profile.recentActivities.length">
-            <el-timeline-item
-              v-for="(a, idx) in profile.recentActivities"
-              :key="idx"
-              :timestamp="formatTime(a.createTime)"
-            >
-              {{ activityText(a) }}
-            </el-timeline-item>
-          </el-timeline>
-          <el-empty v-else description="暂无行为记录" />
+    <!-- Loading State -->
+    <div v-if="loading" class="loading-state">
+      <div class="skeleton-profile"></div>
+    </div>
+
+    <div v-else class="profile-content">
+      <!-- Profile Card -->
+      <div class="profile-card" v-if="profile">
+        <div class="profile-avatar">
+          {{ (profile.username?.trim()?.[0] || 'U').toUpperCase() }}
         </div>
-      </el-tab-pane>
+        <div class="profile-info">
+          <h2 class="profile-name">{{ profile.username }}</h2>
+          <p class="profile-welcome">欢迎回来，继续你的学习之旅</p>
+        </div>
+        <div class="profile-stats">
+          <div class="stat-item">
+            <span class="stat-value">{{ todayMinutes }}</span>
+            <span class="stat-label">今日学习（分钟）</span>
+          </div>
+        </div>
+      </div>
 
-      <el-tab-pane label="收藏">
-        <el-space wrap class="fav-filters">
-          <el-select
-            v-model="filterFolderId"
-            clearable
-            placeholder="按收藏夹筛选"
-            style="width: 200px"
-            @change="loadFavorites"
+      <!-- Tabs -->
+      <div class="tabs-container">
+        <div class="tabs-header">
+          <button
+            class="tab-btn"
+            :class="{ active: activeTab === 'overview' }"
+            @click="activeTab = 'overview'"
           >
-            <el-option v-for="f in folders" :key="f.id" :label="f.name" :value="f.id" />
-          </el-select>
-          <el-select
-            v-model="filterTargetType"
-            clearable
-            placeholder="类型"
-            style="width: 160px"
-            @change="loadFavorites"
+            学习概览
+          </button>
+          <button
+            class="tab-btn"
+            :class="{ active: activeTab === 'favorites' }"
+            @click="activeTab = 'favorites'"
           >
-            <el-option label="知识点" value="KNOWLEDGE_POINT" />
-            <el-option label="题目" value="QUESTION" />
-          </el-select>
-          <el-button @click="loadFavorites">刷新</el-button>
-        </el-space>
+            我的收藏
+          </button>
+          <button
+            class="tab-btn"
+            :class="{ active: activeTab === 'folders' }"
+            @click="activeTab = 'folders'"
+          >
+            收藏夹管理
+          </button>
+        </div>
 
-        <el-table v-loading="favLoading" :data="favorites" stripe style="width: 100%; margin-top: 12px">
-          <el-table-column prop="targetType" label="类型" width="120">
-            <template #default="{ row }">
-              <el-tag :type="row.targetType === 'KNOWLEDGE_POINT' ? 'success' : 'warning'">
-                {{ row.targetType === 'KNOWLEDGE_POINT' ? '知识点' : '题目' }}
-              </el-tag>
-            </template>
-          </el-table-column>
-          <el-table-column label="标题 / 摘要" min-width="200">
-            <template #default="{ row }">
-              <div class="fav-title">{{ favoriteTitle(row) }}</div>
-              <div class="fav-sub muted">{{ favoriteDetail(row) }}</div>
-            </template>
-          </el-table-column>
-          <el-table-column prop="folderName" label="收藏夹" width="140" />
-          <el-table-column prop="note" label="批注" min-width="120" show-overflow-tooltip />
-          <el-table-column prop="createTime" label="收藏时间" width="180">
-            <template #default="{ row }">{{ formatTime(row.createTime) }}</template>
-          </el-table-column>
-          <el-table-column label="操作" width="160" fixed="right">
-            <template #default="{ row }">
-              <el-button link type="primary" @click="openEditFavorite(row)">编辑</el-button>
-              <el-button link type="danger" @click="deleteFavorite(row)">取消收藏</el-button>
-            </template>
-          </el-table-column>
-        </el-table>
-      </el-tab-pane>
+        <!-- Overview Tab -->
+        <div v-if="activeTab === 'overview'" class="tab-content">
+          <div class="activity-section">
+            <h3 class="section-title">最近动态</h3>
+            <div v-if="profile?.recentActivities.length" class="activity-list">
+              <div
+                v-for="(a, idx) in profile.recentActivities"
+                :key="idx"
+                class="activity-item"
+              >
+                <span class="activity-icon">{{ a.activityType === 'STUDY_START' ? '📚' : '✍️' }}</span>
+                <span class="activity-text">{{ activityText(a) }}</span>
+              </div>
+            </div>
+            <div v-else class="empty-activity">
+              <span class="empty-icon">📝</span>
+              <p>暂无学习记录，开始你的第一次学习吧</p>
+            </div>
+          </div>
+        </div>
 
-      <el-tab-pane label="收藏夹管理">
-        <el-button type="primary" @click="openCreateFolder">新建收藏夹</el-button>
-        <el-table :data="folders" style="width: 100%; margin-top: 12px">
-          <el-table-column prop="name" label="名称" />
-          <el-table-column prop="createTime" label="创建时间" width="200">
-            <template #default="{ row }">{{ formatTime(row.createTime) }}</template>
-          </el-table-column>
-          <el-table-column label="操作" width="200">
-            <template #default="{ row }">
-              <el-button link type="primary" @click="openRenameFolder(row)">重命名</el-button>
-              <el-button link type="danger" @click="deleteFolder(row)">删除</el-button>
-            </template>
-          </el-table-column>
-        </el-table>
-      </el-tab-pane>
-    </el-tabs>
+        <!-- Favorites Tab -->
+        <div v-if="activeTab === 'favorites'" class="tab-content">
+          <!-- Filters -->
+          <div class="filters-row">
+            <el-select
+              v-model="filterFolderId"
+              clearable
+              placeholder="按收藏夹筛选"
+              @change="loadFavorites"
+            >
+              <el-option v-for="f in folders" :key="f.id" :label="f.name" :value="f.id" />
+            </el-select>
+            <el-select
+              v-model="filterTargetType"
+              clearable
+              placeholder="类型筛选"
+              @change="loadFavorites"
+            >
+              <el-option label="知识点" value="KNOWLEDGE_POINT" />
+              <el-option label="题目" value="QUESTION" />
+            </el-select>
+            <el-button @click="loadFavorites">刷新</el-button>
+          </div>
 
+          <!-- Favorites List -->
+          <div class="favorites-list" v-loading="favLoading">
+            <div v-if="favorites.length === 0" class="empty-favorites">
+              <span class="empty-icon">⭐</span>
+              <p>暂无收藏内容</p>
+            </div>
+            <div
+              v-for="row in favorites"
+              :key="row.id"
+              class="favorite-item"
+            >
+              <div class="favorite-header">
+                <span class="favorite-type" :class="row.targetType === 'KNOWLEDGE_POINT' ? 'type-point' : 'type-question'">
+                  {{ row.targetType === 'KNOWLEDGE_POINT' ? '知识点' : '题目' }}
+                </span>
+                <span class="favorite-time">{{ formatTime(row.createTime) }}</span>
+              </div>
+              <h4 class="favorite-title">{{ favoriteTitle(row) }}</h4>
+              <p class="favorite-detail">{{ favoriteDetail(row) }}</p>
+              <p v-if="row.note" class="favorite-note">批注：{{ row.note }}</p>
+              <div class="favorite-actions">
+                <el-button size="small" @click="openEditFavorite(row)">编辑</el-button>
+                <el-button size="small" type="danger" @click="deleteFavorite(row)">取消收藏</el-button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Folders Tab -->
+        <div v-if="activeTab === 'folders'" class="tab-content">
+          <div class="folder-header">
+            <h3 class="section-title">收藏夹</h3>
+            <el-button type="primary" size="small" @click="openCreateFolder">
+              新建收藏夹
+            </el-button>
+          </div>
+          <div class="folders-list">
+            <div v-if="folders.length === 0" class="empty-folders">
+              <p>暂无收藏夹</p>
+            </div>
+            <div v-for="folder in folders" :key="folder.id" class="folder-item">
+              <span class="folder-name">{{ folder.name }}</span>
+              <span class="folder-time">{{ formatTime(folder.createTime) }}</span>
+              <div class="folder-actions">
+                <el-button size="small" @click="openRenameFolder(folder)">重命名</el-button>
+                <el-button size="small" type="danger" @click="deleteFolder(folder)">删除</el-button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Folder Dialog -->
     <el-dialog
       v-model="folderFormVisible"
       :title="editingFolder ? '重命名收藏夹' : '新建收藏夹'"
@@ -288,6 +361,7 @@ onMounted(async () => {
       </template>
     </el-dialog>
 
+    <!-- Edit Favorite Dialog -->
     <el-dialog v-model="editFavVisible" title="编辑收藏" width="480px" destroy-on-close>
       <el-form label-width="88px">
         <el-form-item label="收藏夹">
@@ -304,38 +378,354 @@ onMounted(async () => {
         <el-button type="primary" :loading="editFavSubmitting" @click="submitEditFavorite">保存</el-button>
       </template>
     </el-dialog>
-  </el-card>
+  </div>
 </template>
 
 <style scoped>
-.overview {
-  padding: 8px 0;
+.profile-page {
+  animation: fadeIn 0.4s ease forwards;
 }
 
-.welcome {
-  font-size: 16px;
-  margin-bottom: 8px;
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
 }
 
-.stat {
-  color: #606266;
-  margin-bottom: 16px;
+/* Header */
+.page-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 32px;
+  padding-bottom: 24px;
+  border-bottom: 1px solid var(--color-border-cream);
 }
 
-.fav-filters {
-  margin-bottom: 4px;
+.back-btn {
+  color: var(--color-olive-gray) !important;
 }
 
-.fav-title {
+.back-btn:hover {
+  color: var(--color-terracotta) !important;
+}
+
+.back-icon {
+  margin-right: 4px;
+}
+
+.page-title {
+  font-family: var(--font-serif);
+  font-size: 2rem;
+  font-weight: 600;
+  color: var(--color-near-black);
+  margin: 0;
+  text-align: center;
+}
+
+.header-spacer {
+  width: 60px;
+}
+
+/* Profile Card */
+.profile-card {
+  background: var(--color-ivory);
+  border: 1px solid var(--color-border-cream);
+  border-radius: var(--radius-xl);
+  padding: 32px;
+  display: flex;
+  align-items: center;
+  gap: 24px;
+  margin-bottom: 32px;
+}
+
+.profile-avatar {
+  width: 80px;
+  height: 80px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, var(--color-terracotta), var(--color-coral));
+  color: white;
+  font-size: 2rem;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.profile-info {
+  flex: 1;
+}
+
+.profile-name {
+  font-family: var(--font-serif);
+  font-size: 1.75rem;
+  font-weight: 600;
+  color: var(--color-near-black);
+  margin: 0 0 8px 0;
+}
+
+.profile-welcome {
+  font-size: 1rem;
+  color: var(--color-olive-gray);
+  margin: 0;
+}
+
+.profile-stats {
+  display: flex;
+  gap: 32px;
+}
+
+.stat-item {
+  text-align: center;
+}
+
+.stat-value {
+  display: block;
+  font-family: var(--font-serif);
+  font-size: 2rem;
+  font-weight: 700;
+  color: var(--color-terracotta);
+}
+
+.stat-label {
+  font-size: 0.875rem;
+  color: var(--color-olive-gray);
+}
+
+/* Tabs */
+.tabs-container {
+  background: var(--color-ivory);
+  border: 1px solid var(--color-border-cream);
+  border-radius: var(--radius-xl);
+  overflow: hidden;
+}
+
+.tabs-header {
+  display: flex;
+  border-bottom: 1px solid var(--color-border-cream);
+  background: var(--color-parchment);
+}
+
+.tab-btn {
+  flex: 1;
+  padding: 16px 24px;
+  background: none;
+  border: none;
+  font-size: 0.9375rem;
+  font-weight: 500;
+  color: var(--color-olive-gray);
+  cursor: pointer;
+  transition: all var(--transition-base);
+  position: relative;
+}
+
+.tab-btn:hover {
+  color: var(--color-near-black);
+  background: var(--color-warm-sand);
+}
+
+.tab-btn.active {
+  color: var(--color-terracotta);
   font-weight: 600;
 }
 
-.fav-sub {
-  font-size: 12px;
-  margin-top: 4px;
+.tab-btn.active::after {
+  content: '';
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: var(--color-terracotta);
 }
 
-.muted {
-  color: #909399;
+.tab-content {
+  padding: 24px;
+}
+
+/* Activity */
+.section-title {
+  font-family: var(--font-serif);
+  font-size: 1.125rem;
+  font-weight: 600;
+  color: var(--color-near-black);
+  margin: 0 0 16px 0;
+}
+
+.activity-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.activity-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 16px;
+  background: var(--color-parchment);
+  border-radius: var(--radius-md);
+}
+
+.activity-icon {
+  font-size: 1.25rem;
+}
+
+.activity-text {
+  font-size: 0.9375rem;
+  color: var(--color-charcoal-warm);
+}
+
+/* Filters */
+.filters-row {
+  display: flex;
+  gap: 12px;
+  margin-bottom: 20px;
+}
+
+/* Favorites */
+.favorites-list {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.favorite-item {
+  padding: 20px;
+  background: var(--color-parchment);
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--color-border-cream);
+}
+
+.favorite-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8px;
+}
+
+.favorite-type {
+  font-size: 0.75rem;
+  font-weight: 600;
+  padding: 2px 10px;
+  border-radius: 20px;
+  text-transform: uppercase;
+}
+
+.type-point {
+  background: rgba(74, 124, 89, 0.1);
+  color: var(--color-success);
+}
+
+.type-question {
+  background: rgba(201, 100, 66, 0.1);
+  color: var(--color-terracotta);
+}
+
+.favorite-time {
+  font-size: 0.8125rem;
+  color: var(--color-stone-gray);
+}
+
+.favorite-title {
+  font-size: 1rem;
+  font-weight: 600;
+  color: var(--color-near-black);
+  margin: 0 0 4px 0;
+}
+
+.favorite-detail {
+  font-size: 0.875rem;
+  color: var(--color-olive-gray);
+  margin: 0 0 8px 0;
+}
+
+.favorite-note {
+  font-size: 0.875rem;
+  color: var(--color-terracotta);
+  margin: 0 0 12px 0;
+}
+
+.favorite-actions {
+  display: flex;
+  gap: 8px;
+}
+
+/* Folders */
+.folder-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 16px;
+}
+
+.folders-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.folder-item {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 16px 20px;
+  background: var(--color-parchment);
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--color-border-cream);
+}
+
+.folder-name {
+  flex: 1;
+  font-weight: 600;
+  color: var(--color-near-black);
+}
+
+.folder-time {
+  font-size: 0.8125rem;
+  color: var(--color-stone-gray);
+}
+
+.folder-actions {
+  display: flex;
+  gap: 8px;
+}
+
+/* Empty States */
+.empty-activity,
+.empty-favorites,
+.empty-folders {
+  text-align: center;
+  padding: 40px;
+  color: var(--color-olive-gray);
+}
+
+.empty-icon {
+  font-size: 2.5rem;
+  margin-bottom: 8px;
+  display: block;
+}
+
+.empty-activity p,
+.empty-favorites p,
+.empty-folders p {
+  margin: 0;
+}
+
+/* Loading */
+.loading-state {
+  padding: 40px;
+}
+
+.skeleton-profile {
+  height: 160px;
+  background: var(--color-border-cream);
+  border-radius: var(--radius-xl);
+  animation: pulse 1.5s infinite;
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
 }
 </style>

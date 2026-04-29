@@ -1,11 +1,10 @@
 <script setup lang="ts">
-import { computed, nextTick, onMounted, ref, watch } from 'vue'
-import { onUnmounted } from 'vue'
-import { useRoute, useRouter } from 'vue-router'
+import { computed, nextTick, onMounted, onUnmounted, ref } from 'vue'
+import { useRoute } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { aiChatApi } from '@/api/aiChat'
 import { aiChatSse } from '@/api/aiChatSse'
-import type { AiChatContextType, AiChatHistoryItem, AiChatRole } from '@/types/api'
+import type { AiChatContextType, AiChatRole } from '@/types/api'
 import MarkdownText from '@/components/MarkdownText.vue'
 
 type ChatMessage = {
@@ -14,21 +13,29 @@ type ChatMessage = {
   createTime?: string
 }
 
-const route = useRoute()
-const router = useRouter()
-
-const contextType = ref<AiChatContextType | null>(null)
-const contextId = ref<number | null>(null)
-
 const sessionId = ref<number | null>(null)
 const messages = ref<ChatMessage[]>([])
 const inputText = ref('')
 const sending = ref(false)
-const initLoading = ref(false)
-const errorText = ref('')
-let activeEventSource: EventSource | null = null
-
 const listRef = ref<HTMLElement | null>(null)
+let activeEventSource: EventSource | null = null
+const route = useRoute()
+
+const contextType = ref<AiChatContextType | null>(null)
+const contextId = ref<number | null>(null)
+const contextErrorText = ref('')
+
+const storageKey = computed(() => {
+  if (!contextType.value || contextId.value == null) return ''
+  return `ai_chat:${contextType.value}:${contextId.value}`
+})
+
+const quickQuestions = [
+  '帮我讲解一个重要知识点',
+  '推荐一些学习技巧',
+  '如何高效复习？',
+  '帮我出一道练习题',
+]
 
 const stopStream = () => {
   if (activeEventSource) {
@@ -37,16 +44,6 @@ const stopStream = () => {
   }
 }
 
-const storageKey = computed(() => {
-  if (!contextType.value || contextId.value == null) return ''
-  return `ai_chat:${contextType.value}:${contextId.value}`
-})
-
-const dialogTitle = computed(() => {
-  if (!contextType.value) return 'AI 学习助手'
-  return contextType.value === 'KNOWLEDGE_POINT' ? '知识点讲解' : '题目解答'
-})
-
 const scrollToBottom = async () => {
   await nextTick()
   const el = listRef.value
@@ -54,17 +51,16 @@ const scrollToBottom = async () => {
   el.scrollTop = el.scrollHeight
 }
 
-const parseQuery = () => {
+const parseQueryContext = () => {
   const ctRaw = route.query.contextType
   const cidRaw = route.query.contextId
-
   const ct = Array.isArray(ctRaw) ? ctRaw[0] : ctRaw
   const cidStr = Array.isArray(cidRaw) ? cidRaw[0] : cidRaw
 
   if (ct !== 'KNOWLEDGE_POINT' && ct !== 'QUESTION') {
     contextType.value = null
     contextId.value = null
-    errorText.value = 'contextType 参数无效'
+    contextErrorText.value = '请从知识点或题目入口发起 AI 对话'
     return
   }
 
@@ -72,123 +68,57 @@ const parseQuery = () => {
   if (!Number.isFinite(cid) || cid <= 0) {
     contextType.value = null
     contextId.value = null
-    errorText.value = 'contextId 参数无效'
+    contextErrorText.value = '请从知识点或题目入口发起 AI 对话'
     return
   }
 
   contextType.value = ct
   contextId.value = cid
-  errorText.value = ''
+  contextErrorText.value = ''
 }
 
-const loadFromLocalOrStart = async () => {
-  if (!contextType.value || contextId.value == null) return
+const restoreSession = async () => {
   if (!storageKey.value) return
-
-  initLoading.value = true
-  stopStream()
+  const saved = localStorage.getItem(storageKey.value)
+  if (!saved) return
+  const id = Number(saved)
+  if (!Number.isFinite(id) || id <= 0) return
   try {
-    messages.value = []
-    sessionId.value = null
-    inputText.value = ''
-
-    const saved = localStorage.getItem(storageKey.value)
-    if (saved) {
-      const id = Number(saved)
-      if (Number.isFinite(id) && id > 0) {
-        try {
-          const history = await aiChatApi.history(id)
-          sessionId.value = id
-          messages.value = history.map((item: AiChatHistoryItem) => ({
-            role: item.role,
-            content: item.content,
-            createTime: item.createTime,
-          }))
-          await scrollToBottom()
-          return
-        } catch {
-          // fallback
-        }
-      }
-    }
-
-    messages.value = [{ role: 'ASSISTANT', content: '' }]
-    const assistantIndex = 0
-    let settled = false
-    const settle = () => {
-      if (settled) return
-      settled = true
-      initLoading.value = false
-    }
-
-    const done = new Promise<void>((resolve) => {
-      try {
-        activeEventSource = aiChatSse.openStartStream(contextType.value!, contextId.value!, {
-          onSession: (id) => {
-            sessionId.value = id
-            localStorage.setItem(storageKey.value, String(id))
-          },
-          onDelta: (delta) => {
-            messages.value[assistantIndex].content += delta
-            scrollToBottom()
-          },
-          onDone: () => {
-            stopStream()
-            settle()
-            resolve()
-          },
-          onError: async (errorMessage) => {
-            stopStream()
-            try {
-              const res = await aiChatApi.start(contextType.value!, contextId.value!)
-              sessionId.value = res.sessionId
-              localStorage.setItem(storageKey.value, String(res.sessionId))
-              messages.value[assistantIndex].content = res.assistantMessage
-            } catch {
-              ElMessage.error(errorMessage || '创建/加载对话失败')
-            } finally {
-              settle()
-              resolve()
-            }
-          },
-        })
-      } catch {
-        ;(async () => {
-          try {
-            const res = await aiChatApi.start(contextType.value!, contextId.value!)
-            sessionId.value = res.sessionId
-            localStorage.setItem(storageKey.value, String(res.sessionId))
-            messages.value = [{ role: 'ASSISTANT', content: res.assistantMessage }]
-            await scrollToBottom()
-          } catch {
-            ElMessage.error('创建/加载对话失败')
-          } finally {
-            settle()
-            resolve()
-          }
-        })()
-      }
-    })
-
+    const history = await aiChatApi.history(id)
+    sessionId.value = id
+    messages.value = history.map((item) => ({
+      role: item.role,
+      content: item.content,
+      createTime: item.createTime,
+    }))
     await scrollToBottom()
-    await done
   } catch {
-    ElMessage.error('创建/加载对话失败')
-  } finally {
-    initLoading.value = false
+    localStorage.removeItem(storageKey.value)
   }
 }
 
-const send = async () => {
-  const text = inputText.value.trim()
-  if (!text) return
-  if (!sessionId.value) return
+const ensureSession = async () => {
+  if (sessionId.value) return sessionId.value
+  if (!contextType.value || contextId.value == null) {
+    throw new Error('missing context')
+  }
+  const startRes = await aiChatApi.start(contextType.value, contextId.value)
+  sessionId.value = startRes.sessionId
+  if (storageKey.value) {
+    localStorage.setItem(storageKey.value, String(startRes.sessionId))
+  }
+  return startRes.sessionId
+}
+
+const sendMessage = async (text: string) => {
+  const content = text.trim()
+  if (!content) return
   if (sending.value) return
 
   sending.value = true
   stopStream()
   try {
-    messages.value.push({ role: 'USER', content: text, createTime: new Date().toISOString() })
+    messages.value.push({ role: 'USER', content })
     inputText.value = ''
     await scrollToBottom()
 
@@ -196,17 +126,25 @@ const send = async () => {
     messages.value.push({ role: 'ASSISTANT', content: '' })
     await scrollToBottom()
 
-    const currentSessionId = sessionId.value!
     let settled = false
     const settle = () => {
       if (settled) return
       settled = true
       sending.value = false
     }
+    let currentSessionId: number
+    try {
+      currentSessionId = await ensureSession()
+    } catch {
+      ElMessage.warning(contextErrorText.value || '请从知识点或题目入口发起 AI 对话')
+      messages.value.pop()
+      settle()
+      return
+    }
 
     const done = new Promise<void>((resolve) => {
       try {
-        activeEventSource = aiChatSse.openMessageStream(currentSessionId, text, {
+        activeEventSource = aiChatSse.openMessageStream(currentSessionId, content, {
           onDelta: (delta) => {
             messages.value[assistantIndex].content += delta
             scrollToBottom()
@@ -219,7 +157,7 @@ const send = async () => {
           onError: async (errorMessage) => {
             stopStream()
             try {
-              const res = await aiChatApi.message(currentSessionId, text)
+              const res = await aiChatApi.message(currentSessionId, content)
               messages.value[assistantIndex].content = res.assistantMessage
             } catch {
               ElMessage.error(errorMessage || '发送失败')
@@ -232,7 +170,7 @@ const send = async () => {
       } catch {
         ;(async () => {
           try {
-            const res = await aiChatApi.message(currentSessionId, text)
+            const res = await aiChatApi.message(currentSessionId, content)
             messages.value[assistantIndex].content = res.assistantMessage
             await scrollToBottom()
           } catch {
@@ -253,59 +191,67 @@ const send = async () => {
   }
 }
 
-watch(
-  () => [route.query.contextType, route.query.contextId],
-  async () => {
-    parseQuery()
-    if (!contextType.value || contextId.value == null) return
-    await loadFromLocalOrStart()
-  },
-)
+const send = () => sendMessage(inputText.value)
 
-onMounted(async () => {
-  parseQuery()
-  if (!contextType.value || contextId.value == null) return
-  await loadFromLocalOrStart()
-})
+const selectQuickQuestion = (question: string) => {
+  sendMessage(question)
+}
+
+const clearChat = () => {
+  messages.value = []
+  sessionId.value = null
+  inputText.value = ''
+}
 
 onUnmounted(() => {
   stopStream()
 })
+
+onMounted(async () => {
+  parseQueryContext()
+  await restoreSession()
+})
 </script>
 
 <template>
-  <div class="ai-chat-page">
+  <div class="ai-direct-page">
     <!-- Page Header -->
     <div class="page-header">
-      <el-button text @click="router.back()" class="back-btn">
-        <span class="back-icon">←</span>
-        返回
-      </el-button>
       <div class="header-content">
-        <h1 class="page-title">{{ dialogTitle }}</h1>
+        <h1 class="page-title">AI 学习助手</h1>
+        <p class="page-desc">随时为你解答学习中的问题</p>
       </div>
-      <div class="header-spacer"></div>
-    </div>
-
-    <!-- Error State -->
-    <div v-if="errorText" class="error-state">
-      <div class="error-icon">!</div>
-      <p class="error-text">{{ errorText }}</p>
-      <el-button @click="router.back()">返回</el-button>
+      <el-button v-if="messages.length > 0" text @click="clearChat">
+        清空对话
+      </el-button>
     </div>
 
     <!-- Chat Container -->
-    <div v-else class="chat-container">
+    <div class="chat-container">
       <!-- Messages -->
       <div class="chat-messages" ref="listRef">
-        <!-- Loading State -->
-        <div v-if="initLoading" class="loading-state">
-          <div class="typing-indicator">
-            <span class="dot"></span>
-            <span class="dot"></span>
-            <span class="dot"></span>
+        <!-- Empty State -->
+        <div v-if="messages.length === 0" class="empty-state">
+          <div class="welcome-card">
+            <div class="welcome-icon">🤖</div>
+            <h2 class="welcome-title">你好，我是你的 AI 学习助手</h2>
+            <p class="welcome-desc">我可以帮你解答问题、讲解知识点、推荐学习技巧</p>
           </div>
-          <p>正在思考...</p>
+
+          <!-- Quick Questions -->
+          <div class="quick-questions">
+            <p class="quick-label">试试这些问题：</p>
+            <div class="quick-grid">
+              <button
+                v-for="q in quickQuestions"
+                :key="q"
+                class="quick-btn"
+                @click="selectQuickQuestion(q)"
+              >
+                {{ q }}
+              </button>
+            </div>
+          </div>
         </div>
 
         <!-- Messages List -->
@@ -334,12 +280,6 @@ onUnmounted(() => {
               </div>
             </div>
           </div>
-
-          <div v-if="messages.length === 0" class="empty-state">
-            <div class="empty-icon">🤖</div>
-            <h3>开始对话</h3>
-            <p>有什么学习上的问题，尽管问我吧</p>
-          </div>
         </div>
       </div>
 
@@ -358,11 +298,11 @@ onUnmounted(() => {
           <el-button
             type="primary"
             :loading="sending"
-            :disabled="!inputText.trim() || initLoading"
+            :disabled="!inputText.trim()"
             @click="send"
             class="send-btn"
           >
-            <span v-if="!sending">发送</span>
+            发送
           </el-button>
         </div>
         <p class="input-hint">按 Enter 发送，Shift+Enter 换行</p>
@@ -372,7 +312,7 @@ onUnmounted(() => {
 </template>
 
 <style scoped>
-.ai-chat-page {
+.ai-direct-page {
   display: flex;
   flex-direction: column;
   height: calc(100vh - 72px - 64px);
@@ -387,73 +327,25 @@ onUnmounted(() => {
 /* Header */
 .page-header {
   display: flex;
-  align-items: center;
   justify-content: space-between;
-  padding-bottom: 24px;
+  align-items: flex-start;
   margin-bottom: 24px;
+  padding-bottom: 24px;
   border-bottom: 1px solid var(--color-border-cream);
-}
-
-.back-btn {
-  color: var(--color-olive-gray) !important;
-  font-size: 0.9375rem;
-  transition: color var(--transition-fast);
-}
-
-.back-btn:hover {
-  color: var(--color-terracotta) !important;
-}
-
-.back-icon {
-  margin-right: 4px;
-}
-
-.header-content {
-  text-align: center;
 }
 
 .page-title {
   font-family: var(--font-serif);
-  font-size: 1.5rem;
+  font-size: 2rem;
   font-weight: 600;
   color: var(--color-near-black);
-  margin: 0;
+  margin: 0 0 8px 0;
 }
 
-.header-spacer {
-  width: 60px;
-}
-
-/* Error State */
-.error-state {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  text-align: center;
-  padding: 48px;
-  background: var(--color-ivory);
-  border-radius: var(--radius-xl);
-}
-
-.error-icon {
-  width: 48px;
-  height: 48px;
-  border-radius: 50%;
-  background: rgba(181, 51, 51, 0.1);
-  color: var(--color-error);
-  font-size: 1.5rem;
-  font-weight: 700;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  margin-bottom: 16px;
-}
-
-.error-text {
+.page-desc {
+  font-size: 1rem;
   color: var(--color-olive-gray);
-  margin-bottom: 24px;
+  margin: 0;
 }
 
 /* Chat Container */
@@ -467,6 +359,76 @@ onUnmounted(() => {
   overflow: hidden;
 }
 
+/* Empty State */
+.empty-state {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 48px;
+}
+
+.welcome-card {
+  text-align: center;
+  margin-bottom: 40px;
+}
+
+.welcome-icon {
+  font-size: 4rem;
+  margin-bottom: 16px;
+}
+
+.welcome-title {
+  font-family: var(--font-serif);
+  font-size: 1.5rem;
+  font-weight: 600;
+  color: var(--color-near-black);
+  margin: 0 0 8px 0;
+}
+
+.welcome-desc {
+  font-size: 1rem;
+  color: var(--color-olive-gray);
+  margin: 0;
+}
+
+.quick-questions {
+  width: 100%;
+  max-width: 600px;
+}
+
+.quick-label {
+  font-size: 0.875rem;
+  color: var(--color-stone-gray);
+  margin: 0 0 12px 0;
+  text-align: center;
+}
+
+.quick-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 12px;
+}
+
+.quick-btn {
+  padding: 16px 20px;
+  background: var(--color-parchment);
+  border: 1px solid var(--color-border-cream);
+  border-radius: var(--radius-md);
+  font-size: 0.9375rem;
+  color: var(--color-charcoal-warm);
+  cursor: pointer;
+  transition: all var(--transition-base);
+  text-align: left;
+}
+
+.quick-btn:hover {
+  background: var(--color-warm-sand);
+  border-color: var(--color-ring-warm);
+  transform: translateY(-1px);
+}
+
 /* Messages */
 .chat-messages {
   flex: 1;
@@ -477,40 +439,6 @@ onUnmounted(() => {
   gap: 24px;
 }
 
-/* Loading State */
-.loading-state {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  padding: 48px;
-  color: var(--color-olive-gray);
-}
-
-.typing-indicator {
-  display: flex;
-  gap: 6px;
-  margin-bottom: 12px;
-}
-
-.typing-indicator .dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: var(--color-terracotta);
-  animation: bounce 1.4s infinite ease-in-out;
-}
-
-.typing-indicator .dot:nth-child(1) { animation-delay: 0s; }
-.typing-indicator .dot:nth-child(2) { animation-delay: 0.2s; }
-.typing-indicator .dot:nth-child(3) { animation-delay: 0.4s; }
-
-@keyframes bounce {
-  0%, 80%, 100% { transform: scale(0.6); opacity: 0.5; }
-  40% { transform: scale(1); opacity: 1; }
-}
-
-/* Message */
 .message-wrapper {
   display: flex;
   gap: 16px;
@@ -589,34 +517,6 @@ onUnmounted(() => {
 @keyframes blink {
   0%, 100% { opacity: 1; }
   50% { opacity: 0; }
-}
-
-/* Empty State */
-.empty-state {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  text-align: center;
-  padding: 48px;
-  color: var(--color-olive-gray);
-}
-
-.empty-icon {
-  font-size: 3rem;
-  margin-bottom: 16px;
-}
-
-.empty-state h3 {
-  font-family: var(--font-serif);
-  font-size: 1.25rem;
-  color: var(--color-near-black);
-  margin: 0 0 8px 0;
-}
-
-.empty-state p {
-  margin: 0;
 }
 
 /* Input Area */

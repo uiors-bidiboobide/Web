@@ -3,7 +3,7 @@ import type { AiChatContextType } from '@/types/api'
 export type AiChatSseErrorHandler = (errorMessage?: string) => void
 
 export type AiChatSseStartHandlers = {
-  onSession: (sessionId: number) => void
+  onSession?: (sessionId: number) => void
   onDelta: (delta: string) => void
   onDone?: () => void
   onError: AiChatSseErrorHandler
@@ -48,7 +48,7 @@ export const aiChatSse = {
 
     es.addEventListener('session', (event) => {
       const id = safeParseNumber(String((event as MessageEvent).data))
-      if (id != null) handlers.onSession(id)
+      if (id != null) handlers.onSession?.(id)
     })
 
     es.addEventListener('delta', (event) => {
